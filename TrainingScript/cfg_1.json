@@ -1,0 +1,17 @@
+{
+    "base": {
+        "logging_dir": "logs",
+        "output_dir": "models/ddpm_1",
+        "checkpointing_steps": 5000,
+        "valid_epochs": 1,
+        "dataset_name": "ylecun/mnist",
+        "resolution": 32,
+        "train_batch_size": 64,
+        "num_epochs": 10
+    },
+    "ddpm": {
+        "model_config": "unet_cfg",
+        "learning_rate": 1e-4,
+        "valid_batch_size": 4
+    }
+}
