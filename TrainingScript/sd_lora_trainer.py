@@ -154,7 +154,7 @@ class LoraTrainer(Trainer):
                 train_batch_size * self.accelerator.num_processes
             )
         self.optimizer = torch.optim.AdamW(
-            self.unet.parameters(),
+            self.lora_layers,
             lr=self.cfg.learning_rate,
             betas=(self.cfg.adam_beta1, self.cfg.adam_beta2),
             weight_decay=self.cfg.adam_weight_decay,

@@ -4,7 +4,7 @@ import logging
 import math
 import os
 import shutil
-from datetime import timedelta, datetime
+from datetime import datetime
 from pathlib import Path
 
 import accelerate
@@ -21,9 +21,7 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 
 import diffusers
-from diffusers import DDPMPipeline, DDPMScheduler, UNet2DModel
-from diffusers.training_utils import EMAModel
-from diffusers.utils import check_min_version, is_accelerate_version, is_tensorboard_available, is_wandb_available
+from diffusers.utils import check_min_version, is_tensorboard_available, is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
 
 from training_cfg_1 import BaseTrainingConfig, load_training_config
@@ -253,7 +251,7 @@ def main():
                 if step % cfg.gradient_accumulation_steps == 0:
                     progress_bar.update(1)
                 continue
-            logs = trainer.trainin8g_step(global_step, batch)
+            logs = trainer.training_step(global_step, batch)
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:

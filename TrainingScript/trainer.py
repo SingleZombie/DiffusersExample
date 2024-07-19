@@ -1,5 +1,4 @@
 from abc import ABCMeta, abstractmethod
-from functools import partial
 
 
 class Trainer(metaclass=ABCMeta):

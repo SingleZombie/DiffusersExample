@@ -4,7 +4,6 @@ import logging
 import math
 import os
 import shutil
-from datetime import timedelta
 from pathlib import Path
 
 import accelerate
