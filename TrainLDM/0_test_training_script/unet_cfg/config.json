@@ -1,0 +1,27 @@
+{
+    "_class_name": "UNet2DModel",
+
+    "block_out_channels": [
+      64,
+      128,
+      256,
+      256
+    ],
+    "down_block_types": [
+      "DownBlock2D",
+      "DownBlock2D",
+      "DownBlock2D",
+      "DownBlock2D"
+    ],
+    "in_channels": 3,
+    "out_channels": 3,
+    "layers_per_block":2,
+    "sample_size": 32,
+    "up_block_types": [
+      "UpBlock2D",
+      "UpBlock2D",
+      "UpBlock2D",
+      "UpBlock2D"
+    ]
+  }
+  

@@ -1,0 +1,17 @@
+{
+    "base": {
+        "logging_dir": "logs",
+        "output_dir": "models/ddpm",
+        "checkpointing_steps": 20000,
+        "valid_epochs": 2,
+        "train_dataset_name": "merkol/ffhq-256",
+        "resolution": 32,
+        "train_batch_size": 64,
+        "num_epochs": 50
+    },
+    "ddpm": {
+        "model_config": "unet_cfg",
+        "learning_rate": 1e-4,
+        "valid_batch_size": 4
+    }
+}
