@@ -44,7 +44,7 @@ def main():
     cfgs = load_training_config(args.cfg)
     cfg: BaseTrainingConfig = cfgs.pop('base')
     trainer_type = next(iter(cfgs))
-    trainer_cfg_dict = cfgs[trainer_type]
+    trainer_cfg = cfgs[trainer_type]
 
     logging_dir = os.path.join(cfg.output_dir, cfg.logging_dir)
     accelerator_project_config = ProjectConfiguration(
@@ -66,7 +66,7 @@ def main():
         cfg.mixed_precision = accelerator.mixed_precision
 
     trainer: Trainer = create_trainer(
-        trainer_type, weight_dtype, accelerator, cfg.logger, trainer_cfg_dict)
+        trainer_type, weight_dtype, accelerator, cfg.logger, trainer_cfg)
 
     if cfg.logger == "tensorboard":
         if not is_tensorboard_available():
@@ -244,6 +244,7 @@ def main():
     )
 
     # Train!
+    trainer.validate(first_epoch, global_step)
     for epoch in range(first_epoch, cfg.num_epochs):
         trainer.models_to_train()
         for step, batch in enumerate(train_dataloader):
@@ -300,7 +301,7 @@ def main():
         if accelerator.is_main_process:
             if epoch % cfg.valid_epochs == 0 or \
                     epoch == cfg.num_epochs - 1 or should_stop:
-                trainer.validate(epoch, global_step)
+                trainer.validate(epoch + 1, global_step)
 
             if epoch % cfg.save_model_epochs == 0 or \
                     epoch == cfg.num_epochs - 1 or should_stop:

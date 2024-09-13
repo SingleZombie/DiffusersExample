@@ -2,7 +2,7 @@ import inspect
 import os
 
 from dataclasses import dataclass
-from diffusers import DDPMPipeline, DDPMScheduler, UNet2DModel
+from diffusers import DDPMPipeline, DDPMScheduler
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.utils import is_accelerate_version
@@ -12,6 +12,7 @@ from torchmetrics.image.fid import FrechetInceptionDistance
 
 from trainer import Trainer
 from dataset import DataKey
+from my_unet import MyUnet
 
 
 @dataclass
@@ -54,31 +55,16 @@ class DDPMTrainer(Trainer):
                      enable_xformer=False,
                      gradient_checkpointing=False):
         if self.cfg.model_config is None:
-            self.model = UNet2DModel(
+            self.model = MyUnet(
                 in_channels=3,
                 out_channels=3,
                 layers_per_block=2,
-                block_out_channels=(128, 128, 256, 256, 512, 512),
-                down_block_types=(
-                    "DownBlock2D",
-                    "DownBlock2D",
-                    "DownBlock2D",
-                    "DownBlock2D",
-                    "AttnDownBlock2D",
-                    "DownBlock2D",
-                ),
-                up_block_types=(
-                    "UpBlock2D",
-                    "AttnUpBlock2D",
-                    "UpBlock2D",
-                    "UpBlock2D",
-                    "UpBlock2D",
-                    "UpBlock2D",
-                ),
+                block_channels=(128, 128, 256, 256, 512, 512),
+                has_attn=(False, False, False, False, True, False)
             )
         else:
-            config = UNet2DModel.load_config(self.cfg.model_config)
-            self.model = UNet2DModel.from_config(config)
+            config = MyUnet.load_config(self.cfg.model_config)
+            self.model = MyUnet.from_config(config)
 
         # Create EMA for the model.
         if self.cfg.use_ema:
@@ -88,7 +74,7 @@ class DDPMTrainer(Trainer):
                 use_ema_warmup=True,
                 inv_gamma=self.cfg.ema_inv_gamma,
                 power=self.cfg.ema_power,
-                model_cls=UNet2DModel,
+                model_cls=MyUnet,
                 model_config=self.model.config,
             )
 
@@ -209,7 +195,7 @@ class DDPMTrainer(Trainer):
         pipeline = DDPMPipeline(
             unet=unet,
             scheduler=self.noise_scheduler,
-        )
+        ).to(unet.device)
         pipeline.set_progress_bar_config(disable=True)
 
         # run pipeline in inference (sample random noise and denoise)
@@ -290,7 +276,7 @@ class DDPMTrainer(Trainer):
     def load_model_hook(self, models, input_dir):
         if self.cfg.use_ema:
             load_model = EMAModel.from_pretrained(
-                os.path.join(input_dir, "unet_ema"), UNet2DModel)
+                os.path.join(input_dir, "unet_ema"), MyUnet)
             self.ema_model.load_state_dict(load_model.state_dict())
             self.ema_model.to(self.accelerator.device)
             del load_model
@@ -300,7 +286,7 @@ class DDPMTrainer(Trainer):
             model = models.pop()
 
             # load diffusers style into model
-            load_model = UNet2DModel.from_pretrained(
+            load_model = MyUnet.from_pretrained(
                 input_dir, subfolder="unet")
             model.register_to_config(**load_model.config)
 

@@ -56,11 +56,11 @@ class Trainer(metaclass=ABCMeta):
         pass
 
 
-def create_trainer(type, weight_dtype, accelerator, logger, cfg_dict) -> Trainer:
+def create_trainer(type, weight_dtype, accelerator, logger, cfg) -> Trainer:
     from ddpm_trainer import DDPMTrainer
 
     __TYPE_CLS_DICT = {
         'ddpm': DDPMTrainer
     }
 
-    return __TYPE_CLS_DICT[type](weight_dtype, accelerator, logger, cfg_dict)
+    return __TYPE_CLS_DICT[type](weight_dtype, accelerator, logger, cfg)

@@ -7,7 +7,7 @@
         "train_dataset_name": "merkol/ffhq-256",
         "resolution": 32,
         "train_batch_size": 64,
-        "num_epochs": 50
+        "num_epochs": 10
     },
     "ddpm": {
         "model_config": "unet_cfg",
