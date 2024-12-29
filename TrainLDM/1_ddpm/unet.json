@@ -7,10 +7,10 @@
     256
   ],
   "has_attn": [
-    "False",
-    "False",
-    "True",
-    "False"
+    false,
+    false,
+    false,
+    false
   ],
   "in_channels": 3,
   "out_channels": 3,

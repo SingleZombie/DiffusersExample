@@ -17,6 +17,7 @@ from accelerate.utils import ProjectConfiguration, set_seed
 from huggingface_hub import create_repo, upload_folder
 from packaging import version
 from tqdm.auto import tqdm
+import line_profiler
 
 import diffusers
 from diffusers.utils import check_min_version, is_tensorboard_available, is_wandb_available
@@ -33,6 +34,7 @@ check_min_version("0.30.0.dev0")
 logger = get_logger(__name__, log_level="INFO")
 
 
+@line_profiler.profile
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('cfg', type=str)
@@ -133,7 +135,8 @@ def main():
     trainer.init_modules(enable_xformers, cfg.gradient_checkpointing)
 
     # Initialize the optimizer
-    trainer.init_optimizers(cfg.train_batch_size)
+    trainer.init_optimizers(cfg.train_batch_size,
+                            cfg.gradient_accumulation_steps)
 
     dataset = create_dataset(cfg.resolution,
                              cfg.train_dataset_name,
@@ -288,8 +291,9 @@ def main():
                         accelerator.save_state(save_path)
                         logger.info(f"Saved state to {save_path}")
 
-            progress_bar.set_postfix(**logs)
-            accelerator.log(logs, step=global_step)
+            if accelerator.is_main_process:
+                progress_bar.set_postfix(**logs)
+                accelerator.log(logs, step=global_step)
 
             if stop_steps is not None and local_step >= stop_steps:
                 should_stop = True

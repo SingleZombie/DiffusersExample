@@ -9,7 +9,6 @@ from diffusers.models.attention_processor import Attention
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.unets.unet_2d import UNet2DOutput
-import line_profiler
 
 
 class ResBlock(nn.Module):
@@ -25,28 +24,28 @@ class ResBlock(nn.Module):
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, 1)
         self.norm2 = nn.GroupNorm(num_groups, out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, 1, 1)
-        self.t_linear = nn.Linear(temb_channels, out_channels)
+        self.linear = nn.Linear(temb_channels, out_channels)
         if in_channels != out_channels:
             self.skip_conv = nn.Conv2d(in_channels, out_channels, 3, 1, 1)
         else:
             self.skip_conv = nn.Identity()
 
     def forward(self, x, t):
-        x_shortcut = x
-        x_shortcut = self.skip_conv(x_shortcut)
+        x_input = x
+        x_input = self.skip_conv(x_input)
 
         x = self.norm1(x)
         x = self.nonlinearity(x)
         x = self.conv1(x)
 
-        t = self.t_linear(t)
+        t = self.linear(t)
         x = x + t[:, :, None, None]
 
         x = self.norm2(x)
         x = self.nonlinearity(x)
         x = self.conv2(x)
 
-        x = x + x_shortcut
+        x = x + x_input
 
         return x
 
@@ -217,7 +216,7 @@ class MyUnet(ModelMixin, ConfigMixin):
                  in_channels: int,
                  out_channels: int,
                  block_channels: Sequence[int] = [64, 128, 256, 256],
-                 has_attn: Sequence[bool] = [False, False, False, False],
+                 has_attn: Sequence[bool] = [False, False, True, False],
                  mid_attn: bool = True,
                  num_groups: int = 32,
                  layers_per_block: int = 2

@@ -1,2 +1,4 @@
 diffusers[training]
 torchmetrics[image]
+line_profiler
+datasets

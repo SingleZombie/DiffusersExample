@@ -15,7 +15,7 @@ class Trainer(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def init_optimizers(self, train_batch_size):
+    def init_optimizers(self, train_batch_size, gradient_accumulation_steps=1):
         pass
 
     @abstractmethod

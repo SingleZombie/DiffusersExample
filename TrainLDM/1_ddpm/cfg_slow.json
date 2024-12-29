@@ -1,13 +1,13 @@
 {
     "base": {
         "logging_dir": "logs",
-        "output_dir": "models/ddpm",
+        "output_dir": "models/ddpm_tmp",
         "checkpointing_steps": 5000,
         "valid_epochs": 2,
         "train_dataset_name": "merkol/ffhq-256",
         "resolution": 32,
         "train_batch_size": 64,
-        "dataloader_num_workers": 8,
+        "dataloader_num_workers": 1,
         "num_epochs": 50,
         "resume_from_checkpoint": "latest"
     },

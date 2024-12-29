@@ -26,6 +26,7 @@ class DDPMTrainingConfig:
     # Validation
     valid_batch_size: int = 1
     valid_loops: int = 100
+    valid_fid: bool = False
 
     # EMA
     use_ema: bool = False
@@ -111,10 +112,10 @@ class DDPMTrainer(Trainer):
         if gradient_checkpointing:
             self.model.enable_gradient_checkpointing()
 
-    def init_optimizers(self, train_batch_size):
+    def init_optimizers(self, train_batch_size, gradient_accumulation_steps=1):
         if self.cfg.scale_lr:
             self.cfg.learning_rate = (
-                self.cfg.learning_rate * self.cfg.gradient_accumulation_steps *
+                self.cfg.learning_rate * gradient_accumulation_steps *
                 train_batch_size * self.accelerator.num_processes
             )
         self.optimizer = torch.optim.AdamW(
@@ -144,11 +145,12 @@ class DDPMTrainer(Trainer):
 
     def set_dataset(self, dataset, train_dataloader, valid_dataloader):
         super().set_dataset(dataset, train_dataloader, valid_dataloader)
-        self.fid = FrechetInceptionDistance(
-            2048, normalize=True).to(self.accelerator.device)
-        for batch in self.train_dataloader:
-            self.fid.update(batch[DataKey.IMAGE].to(
-                self.accelerator.device), real=True)
+        if self.cfg.valid_fid:
+            self.fid = FrechetInceptionDistance(
+                2048, normalize=True).to(self.accelerator.device)
+            for batch in self.train_dataloader:
+                self.fid.update(batch[DataKey.IMAGE].to(
+                    self.accelerator.device), real=True)
 
     def models_to_train(self):
         self.model.train()
@@ -213,15 +215,16 @@ class DDPMTrainer(Trainer):
         pipeline.set_progress_bar_config(disable=True)
 
         # run pipeline in inference (sample random noise and denoise)
-        for _ in range(self.cfg.valid_loops):
-            images = pipeline(
-                batch_size=self.cfg.valid_batch_size,
-                num_inference_steps=self.cfg.ddpm_num_inference_steps,
-                output_type="np",
-            ).images
-            image_tensor = torch.from_numpy(
-                images).permute(0, 3, 1, 2).to(self.accelerator.device)
-            self.fid.update(image_tensor, False)
+        if self.cfg.valid_fid:
+            for _ in range(self.cfg.valid_loops):
+                images = pipeline(
+                    batch_size=self.cfg.valid_batch_size,
+                    num_inference_steps=self.cfg.ddpm_num_inference_steps,
+                    output_type="np",
+                ).images
+                image_tensor = torch.from_numpy(
+                    images).permute(0, 3, 1, 2).to(self.accelerator.device)
+                self.fid.update(image_tensor, False)
 
         generator = torch.Generator(
             device=pipeline.device).manual_seed(0)
@@ -238,7 +241,10 @@ class DDPMTrainer(Trainer):
         # denormalize the images and save to tensorboard
         images_processed = (images * 255).round().astype("uint8")
 
-        msg_dict = {'fid': self.fid.compute()}
+        if self.cfg.valid_fid:
+            msg_dict = {'fid': self.fid.compute()}
+        else:
+            msg_dict = {}
         self.accelerator.log(msg_dict, step=global_step)
 
         if self.logger == "tensorboard":
