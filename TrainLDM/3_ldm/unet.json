@@ -1,0 +1,19 @@
+{
+    "_class_name": "MyUnet",
+    "block_channels": [
+        128,
+        256,
+        512,
+        512
+    ],
+    "has_attn": [
+        false,
+        false,
+        true,
+        false
+    ],
+    "in_channels": 3,
+    "out_channels": 3,
+    "layers_per_block": 2,
+    "sample_size": 32
+}

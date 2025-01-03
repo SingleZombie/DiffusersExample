@@ -12,17 +12,35 @@ from torchmetrics import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 
 from trainer import Trainer
 from dataset import DataKey
+from discriminator import Discriminator
+
+
+def calculate_adaptive_weight(rec_loss, g_loss, last_layer):
+    rec_grads = torch.autograd.grad(
+        rec_loss, last_layer, retain_graph=True)[0]
+    g_grads = torch.autograd.grad(
+        g_loss, last_layer, retain_graph=True)[0]
+
+    d_weight = torch.norm(rec_grads) / (torch.norm(g_grads) + 1e-4)
+    d_weight = torch.clamp(d_weight, 0.0, 1e4).detach()
+    return d_weight
 
 
 @dataclass
 class VAETrainingConfig:
     # Model path
     model_config: str
+    disc_model_config: str = None
+
+    # GAN
+    gan_warmup: int = 0
+    num_disc_steps: int = 1
 
     # Loss weights
     mse_weight: float = 1.0
     kl_weight: float = 1e-4
     perceptual_weight: float = 1.0
+    disc_weight: float = 1.0
 
     # Validation
     valid_loops: int = 8
@@ -58,6 +76,12 @@ class TrainingVAE(torch.nn.Module):
             return self.vae.decode(x)
 
 
+def disc_weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        torch.nn.init.normal_(m.weight.data, 0.0, 0.02)
+
+
 class VAETrainer(Trainer):
     def __init__(self, weight_dtype, accelerator, logger, cfg: VAETrainingConfig):
         super().__init__(weight_dtype, accelerator, logger, cfg)
@@ -69,6 +93,13 @@ class VAETrainer(Trainer):
         model_config = AutoencoderKL.load_config(self.cfg.model_config)
         vae = AutoencoderKL.from_config(model_config)
         self.model = TrainingVAE(vae)
+
+        self.use_disc = False
+        if self.cfg.disc_model_config is not None:
+            discriminator = Discriminator.from_config(
+                self.cfg.disc_model_config).apply(disc_weights_init)
+            self.discriminator = discriminator
+            self.use_disc = True
 
         # Create EMA for the model.
         if self.cfg.use_ema:
@@ -103,6 +134,14 @@ class VAETrainer(Trainer):
             weight_decay=self.cfg.adam_weight_decay,
             eps=self.cfg.adam_epsilon,
         )
+        if self.use_disc:
+            self.disc_optimizer = torch.optim.AdamW(
+                self.discriminator.parameters(),
+                lr=self.cfg.learning_rate,
+                betas=(self.cfg.adam_beta1, self.cfg.adam_beta2),
+                weight_decay=self.cfg.adam_weight_decay,
+                eps=self.cfg.adam_epsilon,
+            )
 
     def init_lr_schedulers(self, gradient_accumulation_steps, num_epochs):
         self.lr_scheduler = get_scheduler(
@@ -115,50 +154,102 @@ class VAETrainer(Trainer):
         )
 
     def prepare_modules(self):
-        self.model, self.optimizer, self.train_dataloader, self.lr_scheduler = self.accelerator.prepare(
-            self.model, self.optimizer, self.train_dataloader, self.lr_scheduler
-        )
+        if self.use_disc:
+            self.model, self.discriminator, self.optimizer, self.disc_optimizer, self.train_dataloader, self.lr_scheduler = self.accelerator.prepare(
+                self.model, self.discriminator, self.optimizer, self.disc_optimizer, self.train_dataloader, self.lr_scheduler
+            )
+        else:
+            self.model, self.optimizer, self.train_dataloader, self.lr_scheduler = self.accelerator.prepare(
+                self.model, self.optimizer, self.train_dataloader, self.lr_scheduler
+            )
         if self.cfg.use_ema:
             self.ema_model.to(self.accelerator.device)
         self.perceptual_loss_fn.to(self.accelerator.device)
 
     def models_to_train(self):
         self.model.train()
+        if self.use_disc:
+            self.discriminator.train()
 
     def training_step(self, global_step, batch) -> dict:
         weight_dtype = self.weight_dtype
         input_batch = batch[DataKey.IMAGE].to(weight_dtype)
 
-        with self.accelerator.accumulate(self.model):
-            batch_size = input_batch.shape[0]
-            latent_dist = self.model(input_batch, True).latent_dist
-            latents = latent_dist.sample()
-            recon_input_batch = self.model(latents, False).sample
+        is_generator_step = not self.use_disc or (
+            global_step % (1+self.cfg.num_disc_steps)) == 0
 
-            mse_loss = F.mse_loss(input_batch.float(),
-                                  recon_input_batch.float(),
-                                  reduction="mean")
-            perceptual_loss = self.perceptual_loss_fn(
-                input_batch.float(),  recon_input_batch.float()).sum() / batch_size
+        if is_generator_step:
+            with self.accelerator.accumulate(self.model):
+                batch_size = input_batch.shape[0]
+                latent_dist = self.model(input_batch, True).latent_dist
+                latents = latent_dist.sample()
+                recon_input_batch = self.model(latents, False).sample
 
-            kl_loss = torch.sum(latent_dist.kl()) / batch_size
-            loss = self.cfg.mse_weight * mse_loss + \
-                self.cfg.perceptual_weight * perceptual_loss + \
-                self.cfg.kl_weight * kl_loss
+                mse_loss = F.mse_loss(input_batch.float(),
+                                      recon_input_batch.float(),
+                                      reduction="mean")
+                perceptual_loss = self.perceptual_loss_fn(
+                    input_batch.float(),  recon_input_batch.float()).sum() / batch_size
 
-            self.accelerator.backward(loss)
+                kl_loss = torch.sum(latent_dist.kl()) / batch_size
 
-            if self.accelerator.sync_gradients:
-                self.accelerator.clip_grad_norm_(self.model.parameters(), 1.0)
-            self.optimizer.step()
-            self.lr_scheduler.step()
-            self.optimizer.zero_grad()
+                if self.use_disc and global_step >= self.cfg.gan_warmup:
+                    disc_loss = -self.discriminator(recon_input_batch).mean()
+                    last_dec_layer = self.accelerator.unwrap_model(
+                        self.model).vae.decoder.conv_out.weight
+                    disc_weight = calculate_adaptive_weight(
+                        mse_loss + perceptual_loss, disc_loss,
+                        last_dec_layer)
+                else:
+                    disc_weight = disc_loss = torch.tensor(0)
+
+                loss = self.cfg.mse_weight * mse_loss + \
+                    self.cfg.perceptual_weight * perceptual_loss + \
+                    self.cfg.kl_weight * kl_loss + \
+                    self.cfg.disc_weight * disc_weight * disc_loss
+
+                self.accelerator.backward(loss)
+
+                if self.accelerator.sync_gradients:
+                    self.accelerator.clip_grad_norm_(
+                        self.model.parameters(), 1.0)
+                self.optimizer.step()
+                self.lr_scheduler.step()
+                self.optimizer.zero_grad()
+        else:
+            with self.accelerator.accumulate(self.discriminator):
+                with torch.no_grad():
+                    latent_dist = self.model(input_batch, True).latent_dist
+                    latents = latent_dist.sample()
+                    recon_input_batch = self.model(latents, False).sample
+                real = self.discriminator(input_batch)
+                fake = self.discriminator(recon_input_batch)
+                loss_first_part = torch.mean(F.relu(1 + fake))
+                loss_second_part = torch.mean(F.relu(1 - real))
+                loss = (torch.mean(F.relu(1 + fake)) +
+                        torch.mean(F.relu(1 - real))) * 0.5
+
+                self.accelerator.backward(loss)
+
+                if self.accelerator.sync_gradients:
+                    self.accelerator.clip_grad_norm_(
+                        self.discriminator.parameters(), 1.0)
+                self.disc_optimizer.step()
+                self.lr_scheduler.step()
+                self.disc_optimizer.zero_grad()
 
         if self.accelerator.sync_gradients:
             if self.cfg.use_ema:
                 self.ema_model.step(self.model.parameters())
 
-        logs = {"loss": loss.detach().item()}
+        if is_generator_step:
+            logs = {"vae_loss": loss.detach().item(
+            ), "disc_weight": disc_weight.detach().item(),
+                "disc_loss": disc_loss.detach().item()}
+        else:
+            logs = {"disc_loss": loss.detach().item(),
+                    'fake_loss': loss_first_part.detach().item(),
+                    'real_loss': loss_second_part.detach().item()}
         if self.cfg.use_ema:
             logs["ema_decay"] = self.ema_model.cur_decay_value
 
@@ -244,7 +335,11 @@ class VAETrainer(Trainer):
                     os.path.join(output_dir, "vae_ema"))
 
             for i, model in enumerate(models):
-                model.vae.save_pretrained(os.path.join(output_dir, "vae"))
+                if i == 0:
+                    model.vae.save_pretrained(os.path.join(output_dir, "vae"))
+                elif i == 1:  # discriminator
+                    model.save_pretrained(os.path.join(
+                        output_dir, "discriminator"))
 
                 # make sure to pop weight so that corresponding model is not saved again
                 weights.pop()
@@ -256,6 +351,13 @@ class VAETrainer(Trainer):
             self.ema_model.load_state_dict(load_model.state_dict())
             self.ema_model.to(self.accelerator.device)
             del load_model
+
+        if self.use_disc:
+            discriminator = models.pop()
+            load_model = Discriminator.from_pretrained(
+                input_dir, subfolder="discriminator")
+            discriminator.register_to_config(**load_model.config)
+            discriminator.load_state_dict(load_model.state_dict())
 
         for i in range(len(models)):
             # pop models so that they are not loaded again

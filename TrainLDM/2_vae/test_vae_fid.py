@@ -29,6 +29,20 @@ def main():
     else:
         fid_state_path = None
 
+    valid_dataset = create_dataset(cfg.resolution,
+                                   cfg.train_dataset_name,
+                                   cfg.train_dataset_config_name,
+                                   cfg.train_data_dir,
+                                   cfg.train_data_files,
+                                   cache_dir=cfg.cache_dir,
+                                   center_crop=False,
+                                   random_flip=False)
+
+    valid_dataloader = torch.utils.data.DataLoader(
+        valid_dataset, batch_size=cfg.train_batch_size, shuffle=False,
+        num_workers=cfg.dataloader_num_workers
+    )
+
     device = 'cuda'
 
     fid = FrechetInceptionDistance(normalize=True).to(device)
@@ -45,19 +59,6 @@ def main():
     #     break
 
     if fid_state_path is None or not os.path.exists(fid_state_path):
-        valid_dataset = create_dataset(cfg.resolution,
-                                       cfg.train_dataset_name,
-                                       cfg.train_dataset_config_name,
-                                       cfg.train_data_dir,
-                                       cfg.train_data_files,
-                                       cache_dir=cfg.cache_dir,
-                                       center_crop=False,
-                                       random_flip=False)
-
-        valid_dataloader = torch.utils.data.DataLoader(
-            valid_dataset, batch_size=cfg.train_batch_size, shuffle=False,
-            num_workers=cfg.dataloader_num_workers
-        )
         for i, batch in enumerate(valid_dataloader):
             if n_training_data_batch is not None and i >= n_training_data_batch:
                 break

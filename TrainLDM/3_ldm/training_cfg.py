@@ -4,6 +4,7 @@ from omegaconf import OmegaConf
 
 from ddpm_trainer import DDPMTrainingConfig
 from vae_disc_trainer import VAETrainingConfig
+from uncond_ldm_trainer import UncondLDMTrainingConfig
 
 
 @dataclass
@@ -53,7 +54,8 @@ class BaseTrainingConfig:
 __TYPE_CLS_DICT = {
     'base': BaseTrainingConfig,
     'ddpm': DDPMTrainingConfig,
-    'vae': VAETrainingConfig
+    'vae': VAETrainingConfig,
+    'uncond_ldm': UncondLDMTrainingConfig
 }
 
 

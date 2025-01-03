@@ -1,0 +1,6 @@
+{
+    "_class_name": "Discriminator",
+    "in_channels": 3,
+    "hidden_channels": 512,
+    "depth": 3
+}

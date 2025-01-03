@@ -2,16 +2,18 @@ import inspect
 import os
 
 from dataclasses import dataclass
-from diffusers import DDPMPipeline, DDPMScheduler, UNet2DModel
+from diffusers import DDPMPipeline, DDPMScheduler
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.utils import is_accelerate_version
 import torch
 import torch.nn.functional as F
 from torchmetrics.image.fid import FrechetInceptionDistance
+import line_profiler
 
 from trainer import Trainer
 from dataset import DataKey
+from my_unet import MyUnet
 
 
 @dataclass
@@ -22,6 +24,11 @@ class DDPMTrainingConfig:
     ddpm_beta_schedule: str = 'linear'
     prediction_type: str = 'epsilon'
     ddpm_num_inference_steps: int = 100
+
+    # Validation
+    valid_batch_size: int = 1
+    valid_loops: int = 100
+    valid_fid: bool = False
 
     # EMA
     use_ema: bool = False
@@ -50,31 +57,16 @@ class DDPMTrainer(Trainer):
                      enable_xformer=False,
                      gradient_checkpointing=False):
         if self.cfg.model_config is None:
-            self.model = UNet2DModel(
+            self.model = MyUnet(
                 in_channels=3,
                 out_channels=3,
                 layers_per_block=2,
-                block_out_channels=(128, 128, 256, 256, 512, 512),
-                down_block_types=(
-                    "DownBlock2D",
-                    "DownBlock2D",
-                    "DownBlock2D",
-                    "DownBlock2D",
-                    "AttnDownBlock2D",
-                    "DownBlock2D",
-                ),
-                up_block_types=(
-                    "UpBlock2D",
-                    "AttnUpBlock2D",
-                    "UpBlock2D",
-                    "UpBlock2D",
-                    "UpBlock2D",
-                    "UpBlock2D",
-                ),
+                block_channels=(128, 128, 256, 256, 512, 512),
+                has_attn=(False, False, False, False, True, False)
             )
         else:
-            config = UNet2DModel.load_config(self.cfg.model_config)
-            self.model = UNet2DModel.from_config(config)
+            config = MyUnet.load_config(self.cfg.model_config)
+            self.model = MyUnet.from_config(config)
 
         # Create EMA for the model.
         if self.cfg.use_ema:
@@ -84,7 +76,7 @@ class DDPMTrainer(Trainer):
                 use_ema_warmup=True,
                 inv_gamma=self.cfg.ema_inv_gamma,
                 power=self.cfg.ema_power,
-                model_cls=UNet2DModel,
+                model_cls=MyUnet,
                 model_config=self.model.config,
             )
 
@@ -138,9 +130,19 @@ class DDPMTrainer(Trainer):
         if self.cfg.use_ema:
             self.ema_model.to(self.accelerator.device)
 
+    def set_dataset(self, dataset, train_dataloader, valid_dataloader):
+        super().set_dataset(dataset, train_dataloader, valid_dataloader)
+        if self.cfg.valid_fid:
+            self.fid = FrechetInceptionDistance(
+                2048, normalize=True).to(self.accelerator.device)
+            for batch in self.train_dataloader:
+                self.fid.update(batch[DataKey.IMAGE].to(
+                    self.accelerator.device), real=True)
+
     def models_to_train(self):
         self.model.train()
 
+    @line_profiler.profile
     def training_step(self, global_step, batch) -> dict:
         weight_dtype = self.weight_dtype
         clean_images = batch[DataKey.IMAGE].to(weight_dtype)
@@ -197,10 +199,21 @@ class DDPMTrainer(Trainer):
         pipeline = DDPMPipeline(
             unet=unet,
             scheduler=self.noise_scheduler,
-        )
+        ).to(unet.device)
         pipeline.set_progress_bar_config(disable=True)
 
         # run pipeline in inference (sample random noise and denoise)
+        if self.cfg.valid_fid:
+            for _ in range(self.cfg.valid_loops):
+                images = pipeline(
+                    batch_size=self.cfg.valid_batch_size,
+                    num_inference_steps=self.cfg.ddpm_num_inference_steps,
+                    output_type="np",
+                ).images
+                image_tensor = torch.from_numpy(
+                    images).permute(0, 3, 1, 2).to(self.accelerator.device)
+                self.fid.update(image_tensor, False)
+
         generator = torch.Generator(
             device=pipeline.device).manual_seed(0)
         images = pipeline(
@@ -271,7 +284,7 @@ class DDPMTrainer(Trainer):
     def load_model_hook(self, models, input_dir):
         if self.cfg.use_ema:
             load_model = EMAModel.from_pretrained(
-                os.path.join(input_dir, "unet_ema"), UNet2DModel)
+                os.path.join(input_dir, "unet_ema"), MyUnet)
             self.ema_model.load_state_dict(load_model.state_dict())
             self.ema_model.to(self.accelerator.device)
             del load_model
@@ -281,7 +294,7 @@ class DDPMTrainer(Trainer):
             model = models.pop()
 
             # load diffusers style into model
-            load_model = UNet2DModel.from_pretrained(
+            load_model = MyUnet.from_pretrained(
                 input_dir, subfolder="unet")
             model.register_to_config(**load_model.config)
 

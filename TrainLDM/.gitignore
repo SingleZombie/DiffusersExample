@@ -3,3 +3,5 @@ models
 *.txt
 *.out
 *.lprof
+*.pth
+tmp*

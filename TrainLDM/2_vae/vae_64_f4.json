@@ -5,15 +5,9 @@
     "block_out_channels": [
         128,
         256,
-        512,
-        512,
-        512,
         512
     ],
     "down_block_types": [
-        "DownEncoderBlock2D",
-        "DownEncoderBlock2D",
-        "DownEncoderBlock2D",
         "DownEncoderBlock2D",
         "DownEncoderBlock2D",
         "DownEncoderBlock2D"
@@ -23,15 +17,12 @@
     "use_post_quant_conv": false,
     "force_upcast": true,
     "in_channels": 3,
-    "latent_channels": 16,
+    "latent_channels": 3,
     "layers_per_block": 2,
     "norm_num_groups": 32,
     "out_channels": 3,
-    "sample_size": 512,
+    "sample_size": 64,
     "up_block_types": [
-        "UpDecoderBlock2D",
-        "UpDecoderBlock2D",
-        "UpDecoderBlock2D",
         "UpDecoderBlock2D",
         "UpDecoderBlock2D",
         "UpDecoderBlock2D"

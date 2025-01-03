@@ -59,10 +59,12 @@ class Trainer(metaclass=ABCMeta):
 def create_trainer(type, weight_dtype, accelerator, logger, cfg) -> Trainer:
     from ddpm_trainer import DDPMTrainer
     from vae_disc_trainer import VAETrainer
+    from uncond_ldm_trainer import UncondLDMTrainer
 
     __TYPE_CLS_DICT = {
         'ddpm': DDPMTrainer,
-        'vae': VAETrainer
+        'vae': VAETrainer,
+        'uncond_ldm': UncondLDMTrainer
     }
 
     return __TYPE_CLS_DICT[type](weight_dtype, accelerator, logger, cfg)

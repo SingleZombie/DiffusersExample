@@ -1,0 +1,22 @@
+{
+    "base": {
+        "logging_dir": "logs",
+        "output_dir": "models/vae_perceptual",
+        "checkpointing_steps": 5000,
+        "valid_epochs": 1,
+        "train_dataset_name": "merkol/ffhq-256",
+        "resolution": 64,
+        "train_batch_size": 32,
+        "num_epochs": 20,
+        "resume_from_checkpoint": "latest",
+        "checkpoints_total_limit": 5
+    },
+    "vae": {
+        "model_config": "vae_64_f4.json",
+        "mse_weight": 1.0,
+        "kl_weight": 1e-4,
+        "learning_rate": 1e-4,
+        "perceptual_weight": 1.0,
+        "valid_loops": 8
+    }
+}
